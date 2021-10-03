@@ -1,0 +1,10 @@
+# renamne this file to config.yml
+
+auth:                  # base64 encorded username:password
+domains:
+  - name: example.com
+    hosts: 
+      - name: ""       # example.com
+      - name: "sub1"   # sub1.example.com
+      - name: "sub2"   # sub2.example.com
+      - name: "sub3"   # sub3.example.com
