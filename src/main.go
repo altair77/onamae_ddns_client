@@ -16,97 +16,139 @@ import (
 )
 
 const (
-	CONFIG_FILE   string = "./config.yml"
-	GLOBAL_IP_URL string = "http://inet-ip.info/ip"
-	ONAMAE_URL    string = "ddnsclient.onamae.com:65010"
-	RESPONSE_OK   string = "000 COMMAND SUCCESSFUL\n.\n"
-	RESPONSE_SIZE int    = 32
+	// ConfigFile is config file path
+	ConfigFile string = "./config.yml"
+	// GlobalIpUrl is URL to get global IP address
+	GlobalIpUrl string = "http://inet-ip.info/ip"
+	// OnamaeUrl is URL to update ip onamae.com
+	OnamaeUrl string = "ddnsclient.onamae.com:65010"
+	// ResponseOk is text to compare the communication success string
+	ResponseOk string = "000 COMMAND SUCCESSFUL\n.\n"
+	// ResponseSize is length of ResponseOk
+	ResponseSize int = 32
 )
 
+// Config is format for ConfigFile content
 type Config struct {
-	Auth    string `yaml:"auth"`
+	// Auth is userid:password encoded to Base64
+	Auth string `yaml:"auth"`
+	// Domains are target settings
 	Domains []struct {
-		Name  string `yaml:"name"`
+		// Name is domain name
+		Name string `yaml:"name"`
+		// Hosts is host names
 		Hosts []struct {
 			Name string `yaml:"name"`
 		}
 	}
 }
 
+// Client used to connect by TSL
 type Client struct {
+	// conn is TLS connection
 	conn *tls.Conn
 }
 
-func (self *Client) Open() error {
-	conn, err := tls.Dial("tcp", ONAMAE_URL, nil)
+// Open connection to onamae.com
+// Return: error
+func (c *Client) Open() error {
+	conn, err := tls.Dial("tcp", OnamaeUrl, nil)
 	if err != nil {
 		return err
 	}
-	self.conn = conn
-	return self.verifyResponse()
+	c.conn = conn
+	return c.verifyResponse()
 }
 
-func (self *Client) Close() error {
-	return self.conn.Close()
+// Close connection
+// Return: error
+func (c *Client) Close() error {
+	return c.conn.Close()
 }
 
-func (self *Client) Send(msg string) error {
-	size, err := self.conn.Write([]byte(msg))
+// Send data
+// msg: data to send
+// Return: error
+func (c *Client) Send(msg string) error {
+	size, err := c.conn.Write([]byte(msg))
 	if err != nil {
 		return err
 	}
 	if size != len(msg) {
-		return errors.New("Bad written size")
+		return errors.New("bad written size")
 	}
 	return err
 }
 
-func (self *Client) Login(username string, passwd string) error {
+// Login to onamae.com
+// username: userid
+// passwd: password
+// Return: error
+func (c *Client) Login(username string, passwd string) error {
 	msg := fmt.Sprintf("LOGIN\nUSERID:%s\nPASSWORD:%s\n.\n", username, passwd)
-	if err := self.Send(msg); err != nil {
+	if err := c.Send(msg); err != nil {
 		return err
 	}
-	return self.verifyResponse()
+	return c.verifyResponse()
 }
 
-func (self *Client) Logout() error {
+// Logout by onamae.com
+// Return: error
+func (c *Client) Logout() error {
 	msg := fmt.Sprintf("LOGOUT\n.\n")
-	if err := self.Send(msg); err != nil {
+	if err := c.Send(msg); err != nil {
 		return err
 	}
-	return self.verifyResponse()
+	return c.verifyResponse()
 }
 
-func (self *Client) ModIP(host string, domain string, ip string) error {
-	msg := fmt.Sprintf("MODIP\nHOSTNAME:%s\nDOMNAME:%s\nIPV4:%s\n.\n", host, domain, ip)
-	if err := self.Send(msg); err != nil {
+// ModIP change IP
+// host: hostname
+// domain: domain name
+// ip: ip address
+// Return: error
+func (c *Client) ModIP(host string, domain string, ip string) error {
+	msg := "MODIP\n"
+	if host != "" {
+		msg += fmt.Sprintf("HOSTNAME:%s\n", host)
+	}
+	msg += fmt.Sprintf("DOMNAME:%s\nIPV4:%s\n.\n", domain, ip)
+	if err := c.Send(msg); err != nil {
 		return err
 	}
-	return self.verifyResponse()
+	return c.verifyResponse()
 }
 
-func (self *Client) verifyResponse() error {
-	buf := make([]byte, RESPONSE_SIZE)
-	size, err := self.conn.Read(buf)
+// verifyResponse wait and verify response
+// Return: error
+func (c *Client) verifyResponse() error {
+	buf := make([]byte, ResponseSize)
+	size, err := c.conn.Read(buf)
 	if err != nil {
 		return err
 	}
-	if string(buf[:size]) != RESPONSE_OK {
-		return errors.New("Bad response")
+	if string(buf[:size]) != ResponseOk {
+		return errors.New("bad response")
 	}
 	return err
 }
 
+// readConfig read config file
+// config (out): config data
+// Return: error
 func readConfig(config *Config) error {
-	buf, err := ioutil.ReadFile(CONFIG_FILE)
+	buf, err := ioutil.ReadFile(ConfigFile)
 	if err != nil {
 		return err
 	}
 	return yaml.Unmarshal(buf, config)
 }
 
+// getGlobalIP get global IP address
+// Return: IP address
+// Return: error
 func getGlobalIP() (string, error) {
-	res, err := http.Get(GLOBAL_IP_URL)
+	res, err := http.Get(GlobalIpUrl)
 	if err != nil {
 		return "", err
 	}
@@ -114,6 +156,10 @@ func getGlobalIP() (string, error) {
 	return string(bodyBytes), err
 }
 
+// login onamae.com used by client and config
+// client: connection client
+// config: configuration
+// Return: error
 func login(client *Client, config *Config) error {
 	authDec, err := base64.StdEncoding.DecodeString(config.Auth)
 	if err != nil {
@@ -124,6 +170,11 @@ func login(client *Client, config *Config) error {
 	return err
 }
 
+// update DNS IP address to global IP address
+// client: connection client
+// config: configuration
+// globalIP: global IP address
+// Return: error
 func update(client *Client, config *Config, globalIP string) error {
 	if err := client.Open(); err != nil {
 		return err
@@ -144,14 +195,13 @@ func update(client *Client, config *Config, globalIP string) error {
 
 func main() {
 	config := &Config{}
-	readConfig(config)
+	if err := readConfig(config); err != nil {
+		log.Fatalf("Faild to read config\n%s", err)
+	}
 
 	client := &Client{}
-
 	currentIP := ""
-
-	c := cron.New()
-	c.AddFunc("@every 10m", func() {
+	handler := func() {
 		globalIP, err := getGlobalIP()
 		if err != nil {
 			log.Fatalf("Faild to get global IP\n%s", err)
@@ -163,7 +213,12 @@ func main() {
 			}
 		}
 		currentIP = globalIP
-	})
+	}
+
+	c := cron.New()
+	if _, err := c.AddFunc("@every 10m", handler); err != nil {
+		log.Fatalf("Faild to create cron\n%s", err)
+	}
 	c.Start()
 
 	for {
